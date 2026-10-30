@@ -4,6 +4,19 @@
 
 [官方网站](https://vremoter.vincentstudio.org/) · [下载最新版](https://updates.vincentstudio.org/vremoter/) · [v1.1.1 Release](https://github.com/VincentKingHsu/vRemoter/releases/tag/v1.1.1)
 
+## 关于这个分支（ccc333cn-edition）
+
+这是基于官方 v1.1.1 的社区修改分支，不是作者发布的版本。在官方代码之上加了以下改动，每一项都已单独向作者提交 PR：
+
+| 改动 | 对应 PR |
+|---|---|
+| Chromecast 快速轻点语音键时，遥控器麦克风未开启会自动重开 | [#9](https://github.com/VincentKingHsu/vRemoter/pull/9) |
+| 启用映射时 seize 被拒绝（`0xE00002C1`）后回退到共享模式 | [#10](https://github.com/VincentKingHsu/vRemoter/pull/10) |
+| 支持微信输入法（WeType）作为语音输入法 | [#11](https://github.com/VincentKingHsu/vRemoter/pull/11) |
+| 遥控器语音连接断开后自动重连，不再一直停在“正在连接语音服务” | [#12](https://github.com/VincentKingHsu/vRemoter/pull/12) |
+
+以下是官方 README 原文。
+
 ## 产品定位
 
 vRemoter 把蓝牙语音遥控器变成 macOS 上的 Vibe Coding 控制器：遥控器语音键控制豆包输入法，遥控器麦克风与 MacBook 麦克风混合为同一个 CoreAudio 输入设备 `vRemoteDr 2ch`。
