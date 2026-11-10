@@ -75,7 +75,7 @@ final class X6SearchSuppressor {
             let isSearchSystemEvent = type.rawValue == 14
             let trigger = AppStorage.inputTriggerKey
             let isDelayedX6Trigger = type == .flagsChanged
-                && trigger.keyCodes.contains(keyCode)
+                && trigger.familyKeyCodes.contains(keyCode)
             if isArmed && (
                 isSearchKey || isSearchSystemEvent || isDelayedX6Trigger
             ) {
@@ -148,7 +148,9 @@ final class X6SearchSuppressor {
         // microphone transition twice.
         guard !isSynthetic else { return }
         let trigger = AppStorage.inputTriggerKey
-        guard trigger.keyCodes.contains(keyCode) else { return }
+        // Only the chosen side counts, so the other Command/Option key
+        // keeps working for ordinary shortcuts.
+        guard keyCode == Int64(trigger.keyCode) else { return }
 
         // macOS normally reports modifier edges as `flagsChanged`, but on
         // some keyboards/input-method paths the DOWN edge arrives as a plain

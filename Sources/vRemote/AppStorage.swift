@@ -34,7 +34,7 @@ enum AppStorage {
             recordingEnabledKey: false,
             macInputEnabledKey: true,
             remoteInputEnabledKey: true,
-            inputTriggerKeyKey: InputTriggerKey.option.rawValue,
+            inputTriggerKeyKey: InputTriggerKey.leftOption.rawValue,
         ])
         ensureDirectory(logsDirectory)
         ensureDirectory(applicationSupportDirectory)
@@ -66,7 +66,7 @@ enum AppStorage {
     static var inputTriggerKey: InputTriggerKey {
         get {
             let raw = UserDefaults.standard.string(forKey: inputTriggerKeyKey)
-            return InputTriggerKey(rawValue: raw ?? "") ?? .option
+            return InputTriggerKey.stored(raw) ?? .leftOption
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: inputTriggerKeyKey)
