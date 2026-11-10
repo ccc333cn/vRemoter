@@ -42,7 +42,7 @@ final class AudioPipe: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
 
     private let captureSession = AVCaptureSession()
     private let captureQueue = DispatchQueue(
-        label: "local.simaqingfeng.vRemote.capture",
+        label: "io.github.ccc333cn.vremoter.capture",
         qos: .userInteractive
     )
 

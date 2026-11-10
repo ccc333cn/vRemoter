@@ -69,7 +69,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         AppStorage.prepare()
-        AppAnalytics.configure()
         // Keep one continuous diagnostic history while X6 is being tuned.
         // Log.swift rotates at 5 MB; only the explicit menu action clears it.
         Log.setEnabled(true)
@@ -121,14 +120,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updates.target = self
         menu.addItem(updates)
 
-        let donation = NSMenuItem(
-            title: L10n.text("打赏", "Buy me a coffee"),
-            action: #selector(openDonation),
-            keyEquivalent: ""
-        )
-        donation.target = self
-        menu.addItem(donation)
-
         menu.addItem(.separator())
         let quit = NSMenuItem(
             title: L10n.text("退出", "Quit"),
@@ -144,9 +135,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // X6 HID observation and ATVV audio are independent connections.
         x6.onConnectionChanged = { [weak self] connected in
             self?.x6HIDConnected = connected
-            AppAnalytics.signal(
-                connected ? "Remote.HID.connected" : "Remote.HID.disconnected"
-            )
             self?.updateStatus()
         }
         // X6 does not emit a dependable HID edge on its first short press.
@@ -169,9 +157,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         x6BLE.onConnectionChanged = { [weak self] connected in
             self?.x6BLEConnected = connected
-            AppAnalytics.signal(
-                connected ? "Remote.BLE.connected" : "Remote.BLE.disconnected"
-            )
             if !connected {
                 self?.x6RemoteStreaming = false
                 self?.x6Session.remoteDisconnected(.x6)
@@ -181,7 +166,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         x6BLE.onStreamingChanged = { [weak self] streaming, _ in
             self?.x6RemoteStreaming = streaming
-            AppAnalytics.signal(streaming ? "Voice.started" : "Voice.stopped")
             self?.refreshCombinedStreaming()
             self?.updateStatus()
         }
@@ -207,20 +191,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         chromecastHID.onConnectionChanged = { [weak self] connected in
             self?.chromecastHIDConnected = connected
-            AppAnalytics.signal(
-                connected
-                    ? "Remote.Chromecast.HID.connected"
-                    : "Remote.Chromecast.HID.disconnected"
-            )
             self?.updateStatus()
         }
         chromecastBLE.onConnectionChanged = { [weak self] connected in
             self?.chromecastBLEConnected = connected
-            AppAnalytics.signal(
-                connected
-                    ? "Remote.Chromecast.BLE.connected"
-                    : "Remote.Chromecast.BLE.disconnected"
-            )
             if !connected {
                 self?.chromecastRemoteStreaming = false
                 self?.x6Session.remoteDisconnected(.chromecast)
@@ -230,11 +204,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         chromecastBLE.onStreamingChanged = { [weak self] streaming, _ in
             self?.chromecastRemoteStreaming = streaming
-            AppAnalytics.signal(
-                streaming
-                    ? "Voice.Chromecast.started"
-                    : "Voice.Chromecast.stopped"
-            )
             self?.refreshCombinedStreaming()
             self?.updateStatus()
         }
@@ -318,11 +287,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.debugWindow.show()
         }
-        if CommandLine.arguments.contains("--purchase-demo") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.debugWindow.showPurchase()
-            }
-        } else if CommandLine.arguments.contains("--update-available-demo") {
+        if CommandLine.arguments.contains("--update-available-demo") {
             print("[UPDATE] update-available demo requested")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 self?.updateWindow.showDemoUpdate()
@@ -584,10 +549,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         debugWindow.show()
     }
 
-    @objc private func openDonation() {
-        debugWindow.showDonation()
-    }
-
     @objc private func openVersionUpdates() {
         updateWindow.show()
     }
@@ -785,6 +746,9 @@ if CommandLine.arguments.contains("--voice-session-self-test") {
     exit(VoiceSessionSelfTest.run() ? EXIT_SUCCESS : EXIT_FAILURE)
 }
 #endif
+
+// Before AppController exists: its windows read settings while initializing.
+AppStorage.importLegacySettings()
 
 let app = NSApplication.shared
 let delegate = AppController()

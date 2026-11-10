@@ -5,11 +5,11 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>zh_CN</string>
     <key>CFBundleDisplayName</key>
-    <string>vRemoter</string>
+    <string>vRemoter 社区版</string>
     <key>CFBundleExecutable</key>
     <string>vRemote</string>
     <key>CFBundleIdentifier</key>
-    <string>local.simaqingfeng.vRemote</string>
+    <string>io.github.ccc333cn.vremoter</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -19,9 +19,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.2.3</string>
+    <string>1.3.0</string>
     <key>CFBundleVersion</key>
-    <string>123</string>
+    <string>130</string>
     <key>VRemoterBetaSuffix</key>
     <string></string>
     <key>LSMinimumSystemVersion</key>
@@ -29,13 +29,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>VRReleasesURL</key>
-    <string>https://updates.vincentstudio.org/vremoter/releases.json</string>
-    <key>VRCommerceConfigURL</key>
-    <string>https://updates.vincentstudio.org/vremoter/commerce.json</string>
-	<key>VRTelemetryDeckAppID</key>
-	<string>0B41E7AD-49DA-4A8F-B216-BCF13B3A2D25</string>
-	<key>VRTelemetryDeckNamespace</key>
-	<string>cn.live</string>
+    <string>https://api.github.com/repos/ccc333cn/vRemoter/releases</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>连接蓝牙语音遥控器并接收语音音频。</string>
     <key>NSBluetoothPeripheralUsageDescription</key>

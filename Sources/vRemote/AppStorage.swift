@@ -28,6 +28,36 @@ enum AppStorage {
             )
     }()
 
+    /// The original vRemoter stored its settings under this bundle ID. They
+    /// are copied once, so moving to the community edition keeps the trigger
+    /// key, key mappings and the rest.
+    private static let legacyDomain = "local.simaqingfeng.vRemote" as CFString
+    private static let legacyImportKey = "vRemoter.importedLegacySettings"
+
+    static func importLegacySettings() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: legacyImportKey) else { return }
+        defaults.set(true, forKey: legacyImportKey)
+        guard let keys = CFPreferencesCopyKeyList(
+            legacyDomain,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        ) as? [String],
+            let values = CFPreferencesCopyMultiple(
+                keys as CFArray,
+                legacyDomain,
+                kCFPreferencesCurrentUser,
+                kCFPreferencesAnyHost
+            ) as? [String: Any]
+        else { return }
+        var imported = 0
+        for (key, value) in values where defaults.object(forKey: key) == nil {
+            defaults.set(value, forKey: key)
+            imported += 1
+        }
+        print("[APP] imported \(imported) settings from the original vRemoter")
+    }
+
     static func prepare() {
         UserDefaults.standard.register(defaults: [
             loggingEnabledKey: false,

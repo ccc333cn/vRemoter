@@ -12,20 +12,30 @@ UNSIGNED_PKG="$SCRIPT_DIR/dist/vRemoter-$VERSION-unsigned.pkg"
 FINAL_PKG="$SCRIPT_DIR/dist/vRemoter-$VERSION.pkg"
 
 "$SCRIPT_DIR/Scripts/package-app.sh"
-"$SCRIPT_DIR/Driver/build-driver.sh"
+# VREMOTER_DRIVER points at an already built vRemoteDriver.driver (for
+# example the one shipped in an earlier pkg). Without it the driver is built
+# from the installed BlackHole 2ch, see Driver/README.md.
+DRIVER="${VREMOTER_DRIVER:-$SCRIPT_DIR/Driver/build/vRemoteDriver.driver}"
+if [[ -z "${VREMOTER_DRIVER:-}" ]]; then
+  "$SCRIPT_DIR/Driver/build-driver.sh"
+fi
+[[ -d "$DRIVER" ]] || { print -u2 "Missing driver: $DRIVER"; exit 1; }
 
 rm -rf "$PAYLOAD_ROOT" "$UNSIGNED_PKG" "$FINAL_PKG"
 mkdir -p "$PAYLOAD_ROOT/Applications"
 mkdir -p "$PAYLOAD_ROOT/Library/Audio/Plug-Ins/HAL"
 
 ditto "$SCRIPT_DIR/dist/build/vRemote.app" "$PAYLOAD_ROOT/Applications/vRemote.app"
-ditto "$SCRIPT_DIR/Driver/build/vRemoteDriver.driver" \
+ditto "$DRIVER" \
   "$PAYLOAD_ROOT/Library/Audio/Plug-Ins/HAL/vRemoteDriver.driver"
+
+# Extended attributes would ship as AppleDouble ._ files in the payload.
+xattr -cr "$PAYLOAD_ROOT"
 
 pkgbuild \
   --root "$PAYLOAD_ROOT" \
   --scripts "$SCRIPT_DIR/Packaging/pkg-scripts" \
-  --identifier "local.simaqingfeng.vRemoter.pkg" \
+  --identifier "io.github.ccc333cn.vremoter.pkg" \
   --version "$PACKAGE_VERSION" \
   "$UNSIGNED_PKG"
 

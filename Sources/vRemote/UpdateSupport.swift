@@ -238,7 +238,6 @@ private final class UpdateWindowModel: ObservableObject {
 
     func checkManually() {
         guard !isChecking else { return }
-        AppAnalytics.signal("Update.manualCheck")
         isChecking = true
         Task {
             do {
@@ -280,10 +279,6 @@ private final class UpdateWindowModel: ObservableObject {
 
     func install(_ release: GitHubRelease) {
         guard !isDownloading else { return }
-        AppAnalytics.signal(
-            "Update.installSelected",
-            parameters: ["version": release.displayVersion]
-        )
         isDownloading = true
         Task {
             do {
@@ -313,7 +308,7 @@ private final class UpdateWindowModel: ObservableObject {
           "tag_name": "v1.1.1",
           "name": "vRemoter 1.1.1",
           "body": "- 修复 Chromecast 短按偶尔未持续开启遥控器麦克风的问题\\n- 修复电脑 Option 关闭后旧状态可能重新开启遥控器音频的问题\\n- 改进双遥控器会话隔离与开麦确认\\n- 修复 X6 第一次短按可能被误判的问题",
-          "html_url": "https://updates.vincentstudio.org/vremoter/",
+          "html_url": "https://github.com/ccc333cn/vRemoter/releases",
           "draft": false,
           "prerelease": false,
           "driver_update_required": false,
@@ -338,7 +333,7 @@ final class UpdateWindowController: NSWindowController, NSWindowDelegate {
         let info = Bundle.main.infoDictionary ?? [:]
         let releasesURL = (info["VRReleasesURL"] as? String)
             .flatMap(URL.init(string:))
-            ?? URL(string: "https://updates.vincentstudio.org/vremoter/releases.json")!
+            ?? URL(string: "https://api.github.com/repos/ccc333cn/vRemoter/releases")!
         let version = info["CFBundleShortVersionString"] as? String ?? "development"
         model = UpdateWindowModel(releasesURL: releasesURL, currentVersion: version)
 

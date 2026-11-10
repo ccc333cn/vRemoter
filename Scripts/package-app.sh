@@ -17,7 +17,7 @@ mkdir -p "$CONTENTS/MacOS"
 mkdir -p "$CONTENTS/Resources"
 cp "$SCRIPT_DIR/.build/release/vRemote" "$CONTENTS/MacOS/vRemote"
 cp "$SCRIPT_DIR/Packaging/Info.plist" "$CONTENTS/Info.plist"
-for resource_bundle in "$SCRIPT_DIR/.build/release/"*.bundle; do
+for resource_bundle in "$SCRIPT_DIR/.build/release/"*.bundle(N); do
   [[ -d "$resource_bundle" ]] || continue
   ditto "$resource_bundle" "$CONTENTS/Resources/${resource_bundle:t}"
 done
@@ -48,14 +48,6 @@ if [[ -d "$SCRIPT_DIR/Resources/PermissionGuides" ]]; then
   ditto "$SCRIPT_DIR/Resources/PermissionGuides" \
     "$CONTENTS/Resources/PermissionGuides"
 fi
-if [[ -d "$SCRIPT_DIR/Resources/buymeacoffee" ]]; then
-  ditto "$SCRIPT_DIR/Resources/buymeacoffee" \
-    "$CONTENTS/Resources/BuyMeACoffee"
-fi
-if [[ -d "$SCRIPT_DIR/Resources/Commerce" ]]; then
-  ditto "$SCRIPT_DIR/Resources/Commerce" \
-    "$CONTENTS/Resources/Commerce"
-fi
 if [[ -d "$SCRIPT_DIR/Resources/RemoteImages" ]]; then
   ditto "$SCRIPT_DIR/Resources/RemoteImages" \
     "$CONTENTS/Resources/RemoteImages"
@@ -75,7 +67,7 @@ codesign \
   --deep \
   --sign - \
   --timestamp=none \
-  --requirements '=designated => identifier "local.simaqingfeng.vRemote"' \
+  --requirements '=designated => identifier "io.github.ccc333cn.vremoter"' \
   "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 print "Built: $APP"
