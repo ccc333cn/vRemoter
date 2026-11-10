@@ -813,8 +813,8 @@ private struct KeyMappingView: View {
                         .foregroundStyle(ConsoleTheme.text)
                 }
                 Text(L10n.text(
-                    "遥控器语音键与电脑键盘都使用这个按键控制\(model.voiceInputMethod.title)。按键和触发方式都要与\(model.voiceInputMethod.title)一致：开关型快捷键选「点按切换」，按住说话的快捷键选「按住说话」。",
-                    "The remote voice key and Mac keyboard both use this trigger to control \(model.voiceInputMethod.title). Match both the key and its type: Tap to toggle for start/stop shortcuts, Hold to talk for push-to-talk ones."
+                    "遥控器语音键与电脑键盘都使用这个按键控制输入法。按键和触发方式都要与输入法里的语音快捷键一致：开关型快捷键选「点按切换」，按住说话的快捷键选「按住说话」。",
+                    "The remote voice key and Mac keyboard both use this trigger to control the input method. Match both the key and its type: Tap to toggle for start/stop shortcuts, Hold to talk for push-to-talk ones."
                 ))
                     .font(.system(size: 12.5))
                     .foregroundStyle(ConsoleTheme.secondary)
