@@ -773,6 +773,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         chromecastBLE.stop()
         AudioPipe.shared.stop()
         SystemInputRoute.restore()
+        // 切换器会话若还挂着 ⌘ 虚按住状态，退出时收尾。
+        AppSwitcherSession.shared.cancel()
     }
 }
 
