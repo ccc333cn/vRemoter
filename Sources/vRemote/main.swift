@@ -733,6 +733,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         x6BLE.stop()
         chromecastBLE.stop()
         AudioPipe.shared.stop()
+        Key.releaseHeldTrigger()
         SystemInputRoute.restore()
         // 切换器会话若还挂着 ⌘ 虚按住状态，退出时收尾。
         AppSwitcherSession.shared.cancel()

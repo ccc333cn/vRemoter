@@ -94,6 +94,23 @@ enum InputTriggerKey: String, CaseIterable, Identifiable {
     }
 }
 
+/// How the input method's voice shortcut behaves.
+enum InputTriggerMode: String, CaseIterable, Identifiable {
+    /// Press once to start, press again to stop.
+    case toggle
+    /// Recognition runs only while the key is held.
+    case hold
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .toggle: L10n.text("点按切换", "Tap to toggle")
+        case .hold: L10n.text("按住说话", "Hold to talk")
+        }
+    }
+}
+
 enum Key {
     /// Lets the event tap distinguish vRemoter-generated events from physical
     /// keyboards, Bluetooth buttons, and external remappers.
@@ -105,6 +122,40 @@ enum Key {
 
     static func triggerUp(_ trigger: InputTriggerKey = AppStorage.inputTriggerKey) {
         post(trigger: trigger, keyDown: false)
+    }
+
+    /// The trigger kept down while a hold-to-talk recognition runs.
+    private static var heldTrigger: InputTriggerKey?
+
+    /// Starts recognition: a click for toggle shortcuts, a press that stays
+    /// down for hold-to-talk ones.
+    static func beginRecognition() {
+        switch AppStorage.inputTriggerMode {
+        case .toggle:
+            triggerTap()
+        case .hold:
+            guard heldTrigger == nil else { return }
+            let trigger = AppStorage.inputTriggerKey
+            heldTrigger = trigger
+            triggerDown(trigger)
+        }
+    }
+
+    /// Stops recognition started by `beginRecognition()`.
+    static func endRecognition() {
+        switch AppStorage.inputTriggerMode {
+        case .toggle:
+            triggerTap()
+        case .hold:
+            releaseHeldTrigger()
+        }
+    }
+
+    /// Lets go of a held hold-to-talk trigger, if any. Safe to call anytime.
+    static func releaseHeldTrigger() {
+        guard let trigger = heldTrigger else { return }
+        heldTrigger = nil
+        triggerUp(trigger)
     }
 
     /// A deliberate short modifier click for Doubao's toggle mode.

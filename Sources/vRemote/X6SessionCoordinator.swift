@@ -69,7 +69,11 @@ final class X6SessionCoordinator {
 
     private let doubaoState: any DoubaoAudioStateProviding
     private let setRemoteRouteActive: (Bool) -> Void
-    private let triggerTap: () -> Void
+    /// Sends the input-method trigger: `true` starts recognition, `false`
+    /// stops it.
+    private let sendTrigger: (Bool) -> Void
+    /// Lets go of a hold-to-talk trigger whenever a session ends.
+    private let releaseTrigger: () -> Void
     private let now: () -> Date
 
     private var phase: Phase = .closed
@@ -105,12 +109,16 @@ final class X6SessionCoordinator {
         setRemoteRouteActive: @escaping (Bool) -> Void = {
             AudioPipe.shared.setRemoteActive($0)
         },
-        triggerTap: @escaping () -> Void = { Key.triggerTap() },
+        sendTrigger: @escaping (Bool) -> Void = {
+            $0 ? Key.beginRecognition() : Key.endRecognition()
+        },
+        releaseTrigger: @escaping () -> Void = { Key.releaseHeldTrigger() },
         now: @escaping () -> Date = Date.init
     ) {
         self.doubaoState = doubaoState
         self.setRemoteRouteActive = setRemoteRouteActive
-        self.triggerTap = triggerTap
+        self.sendTrigger = sendTrigger
+        self.releaseTrigger = releaseTrigger
         self.now = now
     }
 
@@ -447,6 +455,7 @@ final class X6SessionCoordinator {
         owner = .none
         sessionRemote = nil
         physicalVoiceGestures.removeAll()
+        releaseTrigger()
         closeRouteAndTransports()
         publish("已手动关闭")
     }
@@ -568,7 +577,7 @@ final class X6SessionCoordinator {
         sessionRemote = remote
         activateRemoteRoute()
         if sendTrigger {
-            triggerTap()
+            self.sendTrigger(true)
         }
         if requestTransportImmediately {
             requestRemoteTransportOpen(
@@ -610,7 +619,7 @@ final class X6SessionCoordinator {
         owner = .none
         openRequestedRemote = nil
         if sendTrigger {
-            triggerTap()
+            self.sendTrigger(false)
         }
         scheduleRouteClose(after: 0.10)
         scheduleCloseVerification(for: generation)
@@ -628,6 +637,7 @@ final class X6SessionCoordinator {
         owner = .none
         sessionRemote = nil
         physicalVoiceGestures.removeAll()
+        releaseTrigger()
         closeRouteAndTransports()
         print("[VOICE-SESSION] closed reason=\(reason)")
     }

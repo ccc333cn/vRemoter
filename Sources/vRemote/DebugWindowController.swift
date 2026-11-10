@@ -271,6 +271,7 @@ private final class ConsoleViewModel: ObservableObject {
     @Published var x6Connected = false
     @Published var chromecastConnected = false
     @Published var inputTriggerKey = AppStorage.inputTriggerKey
+    @Published var inputTriggerMode = AppStorage.inputTriggerMode
     @Published var voiceInputMethod = VoiceInputMethod.current
     @Published var activeModal: ConsoleModal?
     @Published var showX6MicHint = !UserDefaults.standard.bool(
@@ -289,9 +290,18 @@ private final class ConsoleViewModel: ObservableObject {
 
     func setInputTrigger(_ trigger: InputTriggerKey) {
         guard inputTriggerKey != trigger else { return }
+        Key.releaseHeldTrigger()
         inputTriggerKey = trigger
         AppStorage.inputTriggerKey = trigger
         onInputTriggerChanged?()
+    }
+
+    func setInputTriggerMode(_ mode: InputTriggerMode) {
+        guard inputTriggerMode != mode else { return }
+        Key.releaseHeldTrigger()
+        inputTriggerMode = mode
+        AppStorage.inputTriggerMode = mode
+        print("[INPUT-TRIGGER] mode \(mode.rawValue)")
     }
 
     func setVoiceInputMethod(_ method: VoiceInputMethod) {
@@ -803,8 +813,8 @@ private struct KeyMappingView: View {
                         .foregroundStyle(ConsoleTheme.text)
                 }
                 Text(L10n.text(
-                    "遥控器语音键与电脑键盘都使用这个按键控制\(model.voiceInputMethod.title)。这里必须与\(model.voiceInputMethod.title)中的语音快捷键保持一致。",
-                    "The remote voice key and Mac keyboard both use this trigger to control \(model.voiceInputMethod.title). It must match its voice shortcut."
+                    "遥控器语音键与电脑键盘都使用这个按键控制\(model.voiceInputMethod.title)。按键和触发方式都要与\(model.voiceInputMethod.title)一致：开关型快捷键选「点按切换」，按住说话的快捷键选「按住说话」。",
+                    "The remote voice key and Mac keyboard both use this trigger to control \(model.voiceInputMethod.title). Match both the key and its type: Tap to toggle for start/stop shortcuts, Hold to talk for push-to-talk ones."
                 ))
                     .font(.system(size: 12.5))
                     .foregroundStyle(ConsoleTheme.secondary)
@@ -826,19 +836,38 @@ private struct KeyMappingView: View {
                 .labelsHidden()
                 .frame(width: 158)
                 .disabled(model.remoteStreaming)
-                Picker(
-                    L10n.text("触发键", "Trigger"),
-                    selection: Binding(
-                        get: { model.inputTriggerKey },
-                        set: model.setInputTrigger
-                    )
-                ) {
-                    ForEach(InputTriggerKey.allCases) { trigger in
-                        Text(trigger.title).tag(trigger)
+                HStack(spacing: 6) {
+                    Picker(
+                        L10n.text("触发方式", "Trigger mode"),
+                        selection: Binding(
+                            get: { model.inputTriggerMode },
+                            set: model.setInputTriggerMode
+                        )
+                    ) {
+                        ForEach(InputTriggerMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(width: 104)
+                    .help(L10n.text(
+                        "与输入法中这个快捷键的类型一致：开关型选「点按切换」，按住型选「按住说话」。按住说话时，识别期间这个键保持按下。",
+                        "Match the shortcut type in the input method: Tap to toggle for start/stop shortcuts, Hold to talk for push-to-talk ones. Hold keeps the key down while recognizing."
+                    ))
+                    Picker(
+                        L10n.text("触发键", "Trigger"),
+                        selection: Binding(
+                            get: { model.inputTriggerKey },
+                            set: model.setInputTrigger
+                        )
+                    ) {
+                        ForEach(InputTriggerKey.allCases) { trigger in
+                            Text(trigger.title).tag(trigger)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 158)
                 }
-                .labelsHidden()
-                .frame(width: 158)
                 .disabled(model.remoteStreaming)
                 if model.inputTriggerKey == .function {
                     Label(

@@ -6,6 +6,7 @@ enum AppStorage {
     static let macInputEnabledKey = "macInputEnabled"
     static let remoteInputEnabledKey = "remoteInputEnabled"
     static let inputTriggerKeyKey = "inputTriggerKey"
+    static let inputTriggerModeKey = "inputTriggerMode"
     static let voiceInputMethodKey = "voiceInputMethod"
 
     static let logsDirectory: URL = {
@@ -100,6 +101,16 @@ enum AppStorage {
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: inputTriggerKeyKey)
+        }
+    }
+
+    static var inputTriggerMode: InputTriggerMode {
+        get {
+            let raw = UserDefaults.standard.string(forKey: inputTriggerModeKey)
+            return InputTriggerMode(rawValue: raw ?? "") ?? .toggle
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: inputTriggerModeKey)
         }
     }
 

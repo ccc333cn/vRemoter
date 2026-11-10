@@ -41,6 +41,8 @@ enum VoiceSessionSelfTest {
         let coordinator: X6SessionCoordinator
         var clock = Date(timeIntervalSince1970: 1_000)
         var triggerTapCount = 0
+        var triggerEdges = [Bool]()
+        var releaseCount = 0
         var routeChanges = [Bool]()
         var openRequests = [(VoiceRemoteID, Bool)]()
         var closeRequestCount = 0
@@ -51,19 +53,25 @@ enum VoiceSessionSelfTest {
         init(initialState: DoubaoAudioStateMonitor.State = .inactive) {
             doubao = FakeDoubaoState(state: initialState)
             var routeSink: ((Bool) -> Void)?
-            var triggerSink: (() -> Void)?
+            var triggerSink: ((Bool) -> Void)?
+            var releaseSink: (() -> Void)?
             var nowSink: (() -> Date)?
             coordinator = X6SessionCoordinator(
                 doubaoState: doubao,
                 setRemoteRouteActive: { routeSink?($0) },
-                triggerTap: { triggerSink?() },
+                sendTrigger: { triggerSink?($0) },
+                releaseTrigger: { releaseSink?() },
                 now: { nowSink?() ?? Date(timeIntervalSince1970: 0) }
             )
             routeSink = { [weak self] active in
                 self?.routeChanges.append(active)
             }
-            triggerSink = { [weak self] in
+            triggerSink = { [weak self] opening in
                 self?.triggerTapCount += 1
+                self?.triggerEdges.append(opening)
+            }
+            releaseSink = { [weak self] in
+                self?.releaseCount += 1
             }
             nowSink = { [weak self] in
                 self?.clock ?? Date(timeIntervalSince1970: 0)
@@ -130,6 +138,7 @@ enum VoiceSessionSelfTest {
         testActiveBeforeRelease(checks)
         testStopBeforeActive(checks)
         testSecondTapCloses(checks)
+        testTriggerEdgesAndRelease(checks)
         testLongPressCloses(checks)
         testKeyboardOpenRemoteClose(checks)
         testRemoteOpenKeyboardClose(checks)
@@ -181,6 +190,29 @@ enum VoiceSessionSelfTest {
         c.expect(h.triggerTapCount == 2, "second short tap sends exactly one close trigger")
         c.expect(h.openRequests.count == 1, "second tap never reopens microphone")
         c.expect(h.coordinator.debugSnapshot.phase == "closing", "second tap enters closing")
+    }
+
+    private static func testTriggerEdgesAndRelease(_ c: CheckContext) {
+        let h = Harness()
+        h.beginChromecastPress()
+        h.advance(0.15)
+        h.endChromecastPress()
+        h.doubao.emit(.active)
+        h.coordinator.remoteAudioStarted(remote: .chromecast, reason: 0x00)
+        h.beginChromecastPress()
+        h.advance(0.16)
+        h.endChromecastPress()
+        c.expect(h.triggerEdges == [true, false], "tap open then tap close send start and stop edges")
+        h.doubao.emit(.inactive)
+        c.expect(h.releaseCount >= 1, "closed session releases a held trigger")
+
+        let timeout = Harness()
+        timeout.beginChromecastPress()
+        timeout.advance(0.15)
+        timeout.endChromecastPress()
+        timeout.coordinator.forceClose()
+        c.expect(timeout.triggerEdges == [true], "forced close sends no extra toggle")
+        c.expect(timeout.releaseCount >= 1, "forced close releases a held trigger")
     }
 
     private static func testLongPressCloses(_ c: CheckContext) {
