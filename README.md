@@ -4,7 +4,7 @@
 
 本项目基于 [VincentKingHsu/vRemoter](https://github.com/VincentKingHsu/vRemoter)（MIT 协议）v1.2.3，由社区独立维护，**不再同步原项目的更新**，与原作者无关。
 
-当前版本：`1.3.1`
+当前版本：`1.3.2`
 
 ## 和原版的区别
 
