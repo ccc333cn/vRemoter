@@ -21,6 +21,50 @@ enum LaunchAtLogin {
         }
     }
 
+    /// The login item stores the app path from when it was turned on, so it
+    /// can keep launching an old copy after the app moves or is reinstalled.
+    /// Point it at this copy when this copy is the installed one, or when the
+    /// recorded app no longer exists. A build run from elsewhere never takes
+    /// over an installed app's login item.
+    static func repairPathIfNeeded() {
+        guard isEnabled,
+              let data = try? Data(contentsOf: agentURL),
+              let plist = try? PropertyListSerialization.propertyList(
+                  from: data,
+                  format: nil
+              ) as? [String: Any],
+              let arguments = plist["ProgramArguments"] as? [String],
+              let recordedPath = arguments.last
+        else { return }
+
+        let bundlePath = Bundle.main.bundlePath
+        guard bundlePath.hasSuffix(".app"), recordedPath != bundlePath else { return }
+        let installed = bundlePath.hasPrefix("/Applications/")
+            || bundlePath.hasPrefix(
+                FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Applications").path + "/"
+            )
+        guard installed
+                || !FileManager.default.fileExists(atPath: recordedPath)
+        else { return }
+
+        var updated = plist
+        updated["ProgramArguments"] = ["/usr/bin/open", bundlePath]
+        guard let output = try? PropertyListSerialization.data(
+            fromPropertyList: updated,
+            format: .xml,
+            options: 0
+        ) else { return }
+        // launchd reads the file again at the next login; reloading now
+        // would only open this already running app a second time.
+        do {
+            try output.write(to: agentURL, options: .atomic)
+            print("[LOGIN] login item moved from \(recordedPath) to \(bundlePath)")
+        } catch {
+            print("[LOGIN] could not update login item: \(error.localizedDescription)")
+        }
+    }
+
     private static func install() throws {
         let bundlePath = Bundle.main.bundlePath
         guard bundlePath.hasSuffix(".app") else {

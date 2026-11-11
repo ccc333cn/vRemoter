@@ -76,6 +76,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             forInfoDictionaryKey: "CFBundleShortVersionString"
         ) as? String ?? "development"
         print("[APP] ===== vRemoter \(appVersion) started =====")
+        LaunchAtLogin.repairPathIfNeeded()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let statusImage = LogoAsset.image.copy() as? NSImage
