@@ -55,7 +55,8 @@ VREMOTER_DRIVER=/path/to/vRemoteDriver.driver Scripts/build-pkg.sh   # -> dist/v
 - It turns remote gestures into input-method triggers: short tap toggles, long press (≥0.55 s) is hold-to-talk.
 - Transport START/STOP is never itself a keyboard toggle.
 - It never trusts its own assumptions about the input method's state. It verifies through `DoubaoAudioStateMonitor`, which reads the IME process's real CoreAudio capture state (`kAudioProcessPropertyIsRunningInput`). For example, if the IME is not recording 1 s after opening, it closes with "opening timeout".
-- Collaborators are injected (`sendTrigger`, `releaseTrigger`, `doubaoState`, `now`) so the self-test can drive it.
+- **Compatibility mode:** `IsRunningInput` only exists on macOS 14.2+. The monitor probes the HAL at launch and sets `canObserveRecording`. When it is false (or forced with `defaults write io.github.ccc333cn.vremoter voiceCompatibilityMode -bool YES`), snapshots are always `.unavailable` and `pid` only says whether the IME runs. The coordinator then opens as soon as the IME is running, closes on the key press (hold mode: on the keyboard release) without waiting for an inactive edge, and appends "兼容模式" to statuses. Use the override to test this path on a new Mac; `defaults delete io.github.ccc333cn.vremoter voiceCompatibilityMode` restores detection.
+- Collaborators are injected (`sendTrigger`, `releaseTrigger`, `triggerMode`, `doubaoState`, `now`) so the self-test can drive it.
 
 **Trigger keys** (`InputTrigger.swift`):
 - `InputTriggerKey` is side-specific (left/right Option/Command/Control/Shift, plus Fn).

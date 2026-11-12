@@ -21,25 +21,88 @@ final class DoubaoAudioStateMonitor {
         let processObjectID: AudioObjectID?
         let inputDeviceIDs: [AudioDeviceID]
         let inputDeviceNames: [String]
+        /// False when the system cannot report the input method's capture
+        /// state (macOS before 14.2, or the compatibility override). The
+        /// state is then `.unavailable` even while the input method runs;
+        /// `pid` alone says whether it is running.
+        var captureObservable = true
 
         var isRecording: Bool { state == .active }
 
         var deviceSummary: String {
-            inputDeviceNames.isEmpty
+            guard captureObservable else {
+                return L10n.text("兼容模式", "Compatibility mode")
+            }
+            return inputDeviceNames.isEmpty
                 ? "无"
                 : inputDeviceNames.joined(separator: "、")
         }
     }
 
     private static let targetDeviceName = "vRemoteDr 2ch"
+    /// `defaults write io.github.ccc333cn.vremoter voiceCompatibilityMode
+    /// -bool YES` forces compatibility mode (for testing on new systems);
+    /// `NO` forces normal mode; absent means detect.
+    static let compatibilityOverrideKey = "voiceCompatibilityMode"
+
+    /// Whether the input method's real capture state can be read.
+    let canObserveRecording: Bool
 
     private var started = false
     private var processObjectID = AudioObjectID(kAudioObjectUnknown)
     private var processPID: pid_t?
     private var boundBundleID: String?
     private var lastSnapshot: Snapshot?
+    private var workspaceObservers = [NSObjectProtocol]()
 
     var onSnapshotChanged: ((Snapshot) -> Void)?
+
+    init() {
+        let supported = Self.systemReportsProcessInput()
+        let override = UserDefaults.standard.object(
+            forKey: Self.compatibilityOverrideKey
+        ) as? Bool
+        canObserveRecording = override.map { !$0 } ?? supported
+        let os = ProcessInfo.processInfo.operatingSystemVersionString
+        if canObserveRecording {
+            print("[DOUBAO-STATE] capture state supported (\(os))")
+        } else {
+            print(
+                "[DOUBAO-STATE] compatibility mode: " +
+                (override == true
+                    ? "forced by \(Self.compatibilityOverrideKey)"
+                    : "system cannot report input-method recording") +
+                " (\(os))"
+            )
+        }
+    }
+
+    /// Probes the HAL instead of trusting the OS version: the process object
+    /// list must exist and a process object must expose IsRunningInput
+    /// (added in macOS 14.2).
+    private static func systemReportsProcessInput() -> Bool {
+        var listAddress = processListAddress
+        guard AudioObjectHasProperty(
+            AudioObjectID(kAudioObjectSystemObject),
+            &listAddress
+        ) else { return false }
+        let processes = objectListProperty(
+            object: AudioObjectID(kAudioObjectSystemObject),
+            selector: kAudioHardwarePropertyProcessObjectList,
+            scope: kAudioObjectPropertyScopeGlobal
+        )
+        guard let first = processes.first else {
+            return ProcessInfo.processInfo.isOperatingSystemAtLeast(
+                OperatingSystemVersion(
+                    majorVersion: 14,
+                    minorVersion: 2,
+                    patchVersion: 0
+                )
+            )
+        }
+        var runningAddress = runningInputAddress
+        return AudioObjectHasProperty(first, &runningAddress)
+    }
 
     private lazy var processListListener: AudioObjectPropertyListenerBlock = {
         [weak self] _, _ in
@@ -58,6 +121,25 @@ final class DoubaoAudioStateMonitor {
     func start() {
         guard !started else { return }
         started = true
+        guard canObserveRecording else {
+            // No HAL process list here; follow the input method's launch
+            // and quit through NSWorkspace instead.
+            let center = NSWorkspace.shared.notificationCenter
+            workspaceObservers = [
+                NSWorkspace.didLaunchApplicationNotification,
+                NSWorkspace.didTerminateApplicationNotification,
+            ].map { name in
+                center.addObserver(
+                    forName: name,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.refreshBindingAndPublish(force: false)
+                }
+            }
+            refreshBindingAndPublish(force: true)
+            return
+        }
 
         var address = Self.processListAddress
         let status = AudioObjectAddPropertyListenerBlock(
@@ -83,6 +165,13 @@ final class DoubaoAudioStateMonitor {
         guard started else { return }
         started = false
         unbindProcessObject()
+        lastSnapshot = nil
+        guard canObserveRecording else {
+            let center = NSWorkspace.shared.notificationCenter
+            workspaceObservers.forEach(center.removeObserver)
+            workspaceObservers.removeAll()
+            return
+        }
 
         var address = Self.processListAddress
         AudioObjectRemovePropertyListenerBlock(
@@ -91,7 +180,6 @@ final class DoubaoAudioStateMonitor {
             .main,
             processListListener
         )
-        lastSnapshot = nil
     }
 
     /// Synchronous pre-event snapshot. The Option event tap calls this before
@@ -126,6 +214,10 @@ final class DoubaoAudioStateMonitor {
         }
 
         let pid = app.processIdentifier
+        guard canObserveRecording else {
+            processPID = pid
+            return
+        }
         let translated = Self.processObject(for: pid)
         guard translated != kAudioObjectUnknown else {
             if processObjectID != kAudioObjectUnknown {
@@ -209,6 +301,16 @@ final class DoubaoAudioStateMonitor {
     }
 
     private func readCurrentSnapshot() -> Snapshot {
+        guard canObserveRecording else {
+            return Snapshot(
+                state: .unavailable,
+                pid: processPID,
+                processObjectID: nil,
+                inputDeviceIDs: [],
+                inputDeviceNames: [],
+                captureObservable: false
+            )
+        }
         guard processObjectID != kAudioObjectUnknown else {
             return Snapshot(
                 state: .unavailable,

@@ -6,9 +6,28 @@ enum VoiceSessionSelfTest {
     private final class FakeDoubaoState: DoubaoAudioStateProviding {
         var onSnapshotChanged: ((DoubaoAudioStateMonitor.Snapshot) -> Void)?
         private(set) var snapshot: DoubaoAudioStateMonitor.Snapshot
+        let canObserveRecording: Bool
 
         init(state: DoubaoAudioStateMonitor.State = .inactive) {
+            canObserveRecording = true
             snapshot = Self.makeSnapshot(state)
+        }
+
+        /// macOS before 14.2: only whether the input method runs is known.
+        init(compatibilityWithInputMethodRunning running: Bool) {
+            canObserveRecording = false
+            snapshot = DoubaoAudioStateMonitor.Snapshot(
+                state: .unavailable,
+                pid: running ? 123 : nil,
+                processObjectID: nil,
+                inputDeviceIDs: [],
+                inputDeviceNames: [],
+                captureObservable: false
+            )
+        }
+
+        func emitCurrent() {
+            onSnapshotChanged?(snapshot)
         }
 
         func start() {}
@@ -49,18 +68,37 @@ enum VoiceSessionSelfTest {
         var remoteCloseRequests = [VoiceRemoteID]()
         var openResults = [RemoteMicrophoneOpenResult]()
         var preferredRemote: VoiceRemoteID? = .chromecast
+        var mode = InputTriggerMode.toggle
 
-        init(initialState: DoubaoAudioStateMonitor.State = .inactive) {
-            doubao = FakeDoubaoState(state: initialState)
+        convenience init(
+            compatibilityWithInputMethodRunning running: Bool,
+            mode: InputTriggerMode = .toggle
+        ) {
+            self.init(
+                doubao: FakeDoubaoState(
+                    compatibilityWithInputMethodRunning: running
+                )
+            )
+            self.mode = mode
+        }
+
+        convenience init(initialState: DoubaoAudioStateMonitor.State = .inactive) {
+            self.init(doubao: FakeDoubaoState(state: initialState))
+        }
+
+        init(doubao: FakeDoubaoState) {
+            self.doubao = doubao
             var routeSink: ((Bool) -> Void)?
             var triggerSink: ((Bool) -> Void)?
             var releaseSink: (() -> Void)?
             var nowSink: (() -> Date)?
+            var modeSink: (() -> InputTriggerMode)?
             coordinator = X6SessionCoordinator(
                 doubaoState: doubao,
                 setRemoteRouteActive: { routeSink?($0) },
                 sendTrigger: { triggerSink?($0) },
                 releaseTrigger: { releaseSink?() },
+                triggerMode: { modeSink?() ?? .toggle },
                 now: { nowSink?() ?? Date(timeIntervalSince1970: 0) }
             )
             routeSink = { [weak self] active in
@@ -73,6 +111,7 @@ enum VoiceSessionSelfTest {
             releaseSink = { [weak self] in
                 self?.releaseCount += 1
             }
+            modeSink = { [weak self] in self?.mode ?? .toggle }
             nowSink = { [weak self] in
                 self?.clock ?? Date(timeIntervalSince1970: 0)
             }
@@ -148,6 +187,12 @@ enum VoiceSessionSelfTest {
         testDebouncedRetry(checks)
         testSilentAckReopens(checks)
         testFirstFrameKeepsStream(checks)
+        testObservableOpeningTimeout(checks)
+        testCompatibilityTapStaysOpen(checks)
+        testCompatibilityHoldRelease(checks)
+        testCompatibilityKeyboardToggle(checks)
+        testCompatibilityKeyboardHold(checks)
+        testCompatibilityInputMethodNotRunning(checks)
         emit("[SELF-TEST] completed failures=\(checks.failures)")
         return checks.failures == 0
     }
@@ -346,6 +391,84 @@ enum VoiceSessionSelfTest {
         RunLoop.current.run(until: Date().addingTimeInterval(0.95))
         c.expect(h.remoteCloseRequests.isEmpty, "streaming audio is never reopened")
         c.expect(h.openRequests.count == 1, "streaming audio sends no extra MIC_OPEN")
+    }
+
+    private static func wait(_ seconds: TimeInterval) {
+        RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    private static func testObservableOpeningTimeout(_ c: CheckContext) {
+        let h = Harness()
+        h.beginChromecastPress()
+        h.advance(0.15)
+        h.endChromecastPress()
+        wait(1.1)
+        c.expect(h.coordinator.debugSnapshot.phase == "closed", "capable system still closes when input method never records")
+    }
+
+    private static func testCompatibilityTapStaysOpen(_ c: CheckContext) {
+        let h = Harness(compatibilityWithInputMethodRunning: true)
+        h.beginChromecastPress()
+        c.expect(h.coordinator.debugSnapshot.phase == "open", "compat: tap opens without capture confirmation")
+        h.advance(0.15)
+        h.endChromecastPress()
+        c.expect(h.openRequests.count == 1, "compat: tap release requests persistent stream")
+        h.coordinator.remoteAudioStarted(remote: .chromecast, reason: 0x00)
+        h.doubao.emitCurrent()
+        wait(1.3)
+        c.expect(h.coordinator.debugSnapshot.phase == "open", "compat: session survives past 1 s")
+        h.beginChromecastPress()
+        h.advance(0.15)
+        h.endChromecastPress()
+        c.expect(h.triggerEdges == [true, false], "compat: second tap sends close trigger")
+        wait(0.2)
+        c.expect(h.coordinator.debugSnapshot.phase == "closed", "compat: close completes without inactive edge")
+        c.expect(h.routeChanges.last == false, "compat: close turns audio route off")
+    }
+
+    private static func testCompatibilityHoldRelease(_ c: CheckContext) {
+        let h = Harness(compatibilityWithInputMethodRunning: true, mode: .hold)
+        h.beginChromecastPress()
+        h.advance(0.80)
+        wait(1.1)
+        c.expect(h.coordinator.debugSnapshot.phase == "open", "compat: held remote stays open past 1 s")
+        h.endChromecastPress()
+        c.expect(h.triggerEdges == [true, false], "compat: hold release ends recognition")
+        wait(0.2)
+        c.expect(h.coordinator.debugSnapshot.phase == "closed", "compat: hold release reaches closed")
+    }
+
+    private static func testCompatibilityKeyboardToggle(_ c: CheckContext) {
+        let h = Harness(compatibilityWithInputMethodRunning: true)
+        h.coordinator.triggerDownObserved(isSynthetic: false)
+        c.expect(h.openRequests.count == 1, "compat: keyboard open requests remote stream")
+        h.coordinator.triggerUpObserved(isSynthetic: false)
+        h.coordinator.remoteAudioStarted(remote: .chromecast, reason: 0x00)
+        wait(1.2)
+        c.expect(h.coordinator.debugSnapshot.phase == "open", "compat: keyboard toggle survives UP reconcile")
+        h.coordinator.triggerDownObserved(isSynthetic: false)
+        h.coordinator.triggerUpObserved(isSynthetic: false)
+        wait(0.2)
+        c.expect(h.coordinator.debugSnapshot.phase == "closed", "compat: second keyboard press closes")
+        c.expect(h.triggerTapCount == 0, "compat: keyboard path never synthesizes")
+    }
+
+    private static func testCompatibilityKeyboardHold(_ c: CheckContext) {
+        let h = Harness(compatibilityWithInputMethodRunning: true, mode: .hold)
+        h.coordinator.triggerDownObserved(isSynthetic: false)
+        c.expect(h.coordinator.debugSnapshot.phase == "open", "compat: keyboard hold opens")
+        h.coordinator.triggerUpObserved(isSynthetic: false)
+        wait(0.2)
+        c.expect(h.coordinator.debugSnapshot.phase == "closed", "compat: keyboard hold release closes")
+    }
+
+    private static func testCompatibilityInputMethodNotRunning(_ c: CheckContext) {
+        let h = Harness(compatibilityWithInputMethodRunning: false)
+        h.beginChromecastPress()
+        h.advance(0.15)
+        h.endChromecastPress()
+        wait(1.1)
+        c.expect(h.coordinator.debugSnapshot.phase == "closed", "compat: input method not running closes mic")
     }
 }
 #endif

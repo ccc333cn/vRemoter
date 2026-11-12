@@ -17,6 +17,9 @@ protocol DoubaoAudioStateProviding: AnyObject {
     var onSnapshotChanged: ((DoubaoAudioStateMonitor.Snapshot) -> Void)? {
         get set
     }
+    /// False on systems that cannot report whether the input method is
+    /// recording. The coordinator then follows key presses alone.
+    var canObserveRecording: Bool { get }
 
     func start()
     func stop()
@@ -65,6 +68,9 @@ final class X6SessionCoordinator {
     // after AUDIO_START; a silent ack never does.
     private static let firstAudioFrameTimeout: TimeInterval = 0.3
     private static let closeVerificationTimeout: TimeInterval = 1.2
+    /// Compatibility mode never sees an inactive edge, so a close completes
+    /// with the route close instead of waiting for one.
+    private static let compatibilityCloseDelay: TimeInterval = 0.10
     private static let maximumOpenAttempts = 3
 
     private let doubaoState: any DoubaoAudioStateProviding
@@ -74,6 +80,7 @@ final class X6SessionCoordinator {
     private let sendTrigger: (Bool) -> Void
     /// Lets go of a hold-to-talk trigger whenever a session ends.
     private let releaseTrigger: () -> Void
+    private let triggerMode: () -> InputTriggerMode
     private let now: () -> Date
 
     private var phase: Phase = .closed
@@ -113,14 +120,20 @@ final class X6SessionCoordinator {
             $0 ? Key.beginRecognition() : Key.endRecognition()
         },
         releaseTrigger: @escaping () -> Void = { Key.releaseHeldTrigger() },
+        triggerMode: @escaping () -> InputTriggerMode = {
+            AppStorage.inputTriggerMode
+        },
         now: @escaping () -> Date = Date.init
     ) {
         self.doubaoState = doubaoState
         self.setRemoteRouteActive = setRemoteRouteActive
         self.sendTrigger = sendTrigger
         self.releaseTrigger = releaseTrigger
+        self.triggerMode = triggerMode
         self.now = now
     }
+
+    private var compatibilityMode: Bool { !doubaoState.canObserveRecording }
 
     var debugSnapshot: DebugSnapshot {
         DebugSnapshot(
@@ -442,6 +455,15 @@ final class X6SessionCoordinator {
             "[TRIGGER] UP source=keyboard phase=\(phase.rawValue) " +
             "owner=\(owner.rawValue)"
         )
+        // Without a capture state nothing else reports that a push-to-talk
+        // shortcut ended, so the key release itself closes the session.
+        if compatibilityMode,
+           triggerMode() == .hold,
+           phase == .opening || phase == .open
+        {
+            beginClosing(sendTrigger: false, reason: "keyboard hold release")
+            return
+        }
         reconcileSoon(after: 0.03)
         reconcileSoon(after: 0.15)
     }
@@ -474,21 +496,7 @@ final class X6SessionCoordinator {
         case .active:
             switch phase {
             case .opening:
-                startVerificationWorkItem?.cancel()
-                startVerificationWorkItem = nil
-                phase = .open
-                activateRemoteRoute()
-                if let remote = sessionRemote,
-                   !streamingRemotes.contains(remote),
-                   openRequestedRemote != remote
-                {
-                    requestRemoteTransportOpen(
-                        remote,
-                        bypassDebounce: false,
-                        attempt: 1
-                    )
-                }
-                publish("豆包录音中 · \(snapshot.deviceSummary)")
+                confirmOpen(snapshot)
 
             case .open:
                 activateRemoteRoute()
@@ -521,11 +529,48 @@ final class X6SessionCoordinator {
             publish("豆包已就绪")
 
         case .unavailable:
+            if compatibilityMode, snapshot.pid != nil {
+                // The input method is running but its capture state is
+                // unknowable; key presses alone drive the session.
+                if phase == .closed {
+                    publish("豆包已就绪")
+                }
+                return
+            }
             if phase != .opening {
                 finalizeClosed(reason: "Doubao unavailable")
             }
             publish("等待豆包输入法")
         }
+    }
+
+    private func confirmOpen(_ snapshot: DoubaoAudioStateMonitor.Snapshot) {
+        startVerificationWorkItem?.cancel()
+        startVerificationWorkItem = nil
+        phase = .open
+        activateRemoteRoute()
+        if let remote = sessionRemote,
+           !streamingRemotes.contains(remote),
+           openRequestedRemote != remote
+        {
+            requestRemoteTransportOpen(
+                remote,
+                bypassDebounce: false,
+                attempt: 1
+            )
+        }
+        publish("豆包录音中 · \(snapshot.deviceSummary)")
+    }
+
+    /// Compatibility mode: a running input method is the only available
+    /// evidence, so the session opens at once. Waiting would only leave a
+    /// window where a second tap is misread as a new open.
+    private func confirmOpenWithoutObservation() {
+        guard compatibilityMode, phase == .opening else { return }
+        let snapshot = doubaoState.snapshotNow()
+        guard snapshot.pid != nil else { return }
+        print("[VOICE-SESSION] compatibility mode: input method running, open")
+        confirmOpen(snapshot)
     }
 
     private func adoptExternalActivation(
@@ -562,6 +607,7 @@ final class X6SessionCoordinator {
         activateRemoteRoute()
         scheduleStartVerification(for: generation)
         publish("豆包正在启动 · 等待遥控器")
+        confirmOpenWithoutObservation()
     }
 
     private func beginOpening(
@@ -592,6 +638,7 @@ final class X6SessionCoordinator {
                 ? "豆包正在启动 · 遥控器已预热"
                 : "遥控器已启动 · 正在打开豆包"
         )
+        confirmOpenWithoutObservation()
     }
 
     private func closeRecognitionFromRemote(reason: String) {
@@ -878,7 +925,9 @@ final class X6SessionCoordinator {
         }
         closeVerificationWorkItem = work
         DispatchQueue.main.asyncAfter(
-            deadline: .now() + Self.closeVerificationTimeout,
+            deadline: .now() + (compatibilityMode
+                ? Self.compatibilityCloseDelay
+                : Self.closeVerificationTimeout),
             execute: work
         )
     }
@@ -960,10 +1009,12 @@ final class X6SessionCoordinator {
     private func publish(_ status: String) {
         // Status copy is written for Doubao; name the selected input method.
         let method = VoiceInputMethod.current
-        onStateChanged?(
-            status
-                .replacingOccurrences(of: "豆包输入法", with: method.title)
-                .replacingOccurrences(of: "豆包", with: method.shortName)
-        )
+        var text = status
+            .replacingOccurrences(of: "豆包输入法", with: method.title)
+            .replacingOccurrences(of: "豆包", with: method.shortName)
+        if compatibilityMode, !text.contains("兼容模式") {
+            text += " · 兼容模式"
+        }
+        onStateChanged?(text)
     }
 }
