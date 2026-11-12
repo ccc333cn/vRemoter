@@ -1058,68 +1058,67 @@ private struct MappingRow: View {
     let enabled: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: button.symbol)
-                .frame(width: 18)
-                .foregroundStyle(button.voiceControlled ? ConsoleTheme.green : ConsoleTheme.secondary)
-            Text(button.title)
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(ConsoleTheme.text)
-                .frame(width: 76, alignment: .leading)
-            Spacer(minLength: 4)
-            if !button.remappable {
-                Text(L10n.text("设备内部功能", "Device-only function"))
-                    .font(.system(size: 11))
-                    .foregroundStyle(ConsoleTheme.tertiary)
-            } else if button.voiceControlled {
-                Text(RemoteMappingTarget.doubaoVoice.title)
-                    .font(.system(size: 11))
-                    .foregroundStyle(ConsoleTheme.green)
-            } else {
-                HStack(spacing: 4) {
-                    Picker(
-                        button.title,
-                        selection: Binding(
-                            get: { mappings.target(for: button, remote: remote) },
-                            set: { target in
-                                if target == .custom {
-                                    showRecorder = true
-                                } else {
-                                    mappings.setTarget(target, for: button, remote: remote)
-                                }
-                            }
-                        )
-                    ) {
-                        ForEach(RemoteMappingTarget.allCases.filter { $0 != .doubaoVoice }) { target in
-                            Text(target == .custom
-                                ? customMenuTitle
-                                : target.title
-                            ).tag(target)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 142)
-                    if isScrollTarget {
-                        Stepper(value: scrollAmountBinding, in: 1...100) {
-                            Text("\(scrollAmountBinding.wrappedValue)")
-                                .monospacedDigit()
-                                .frame(width: 26, alignment: .trailing)
-                        }
-                        .controlSize(.small)
-                        .help(L10n.text("单次滚动行数（1–100）", "Lines per scroll (1–100)"))
-                    }
-                    if mappings.target(for: button, remote: remote) == .custom {
-                        Button { showRecorder = true } label: {
-                            Image(systemName: "record.circle")
-                        }
-                        .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: button.symbol)
+                    .frame(width: 18)
+                    .foregroundStyle(button.voiceControlled ? ConsoleTheme.green : ConsoleTheme.secondary)
+                Text(button.title)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(ConsoleTheme.text)
+                    .frame(width: 76, alignment: .leading)
+                Spacer(minLength: 4)
+                if !button.remappable {
+                    Text(L10n.text("设备内部功能", "Device-only function"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(ConsoleTheme.tertiary)
+                } else if button.voiceControlled {
+                    Text(RemoteMappingTarget.doubaoVoice.title)
+                        .font(.system(size: 11))
                         .foregroundStyle(ConsoleTheme.green)
-                        .help(L10n.text("重新录制按键", "Record again"))
+                } else {
+                    HStack(spacing: 4) {
+                        Picker(
+                            button.title,
+                            selection: Binding(
+                                get: { mappings.target(for: button, remote: remote) },
+                                set: { target in
+                                    if target == .custom {
+                                        showRecorder = true
+                                    } else {
+                                        mappings.setTarget(target, for: button, remote: remote)
+                                    }
+                                }
+                            )
+                        ) {
+                            ForEach(RemoteMappingTarget.allCases.filter { $0 != .doubaoVoice }) { target in
+                                Text(target == .custom
+                                    ? customMenuTitle
+                                    : target.title
+                                ).tag(target)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(minWidth: 108, idealWidth: 142, maxWidth: 142)
+                        if mappings.target(for: button, remote: remote) == .custom {
+                            Button { showRecorder = true } label: {
+                                Image(systemName: "record.circle")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(ConsoleTheme.green)
+                            .help(L10n.text("重新录制按键", "Record again"))
+                        }
                     }
                 }
             }
+            if isScrollTarget {
+                scrollAmountEditor(
+                    up: mappings.target(for: button, remote: remote) == .mouseScrollUp
+                )
+            }
         }
-        .frame(height: isScrollTarget ? 36 : 28)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: isScrollTarget ? 52 : 28)
         .padding(.horizontal, 9)
         .background(ConsoleTheme.surface2)
         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -1145,17 +1144,18 @@ private struct MappingRow: View {
         return target == .mouseScrollUp || target == .mouseScrollDown
     }
 
-    private var scrollAmountBinding: Binding<Int> {
-        let up = mappings.target(for: button, remote: remote) == .mouseScrollUp
-        return Binding(
-            get: { mappings.scrollConfig(for: button, remote: remote, up: up).amount },
-            set: { mappings.setScrollConfig(
-                RemoteScrollConfig(amount: $0),
+    private func scrollAmountEditor(up: Bool) -> some View {
+        ScrollAmountEditor(
+            amount: mappings.scrollConfig(for: button, remote: remote, up: up).amount
+        ) { value in
+            mappings.setScrollConfig(
+                RemoteScrollConfig(amount: value),
                 for: button,
                 remote: remote,
                 up: up
-            ) }
-        )
+            )
+        }
+        .padding(.leading, 26)
     }
 
     /// 「自定义」菜单项标题：已录制显示「自定义（当前：⇧⌘K）」，未录制显示「自定义…」。
@@ -1169,6 +1169,68 @@ private struct MappingRow: View {
             )
         }
         return L10n.text("自定义…", "Custom…")
+    }
+}
+
+/// 滚动行数：既可以直接输入，也可以用步进按钮调整；范围始终收敛到 1–100。
+private struct ScrollAmountEditor: View {
+    let amount: Int
+    let onChange: (Int) -> Void
+    @State private var text: String
+    @FocusState private var focused: Bool
+
+    init(amount: Int, onChange: @escaping (Int) -> Void) {
+        self.amount = amount
+        self.onChange = onChange
+        _text = State(initialValue: String(amount))
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(L10n.text("单次滚动行数", "Lines per scroll"))
+                .font(.system(size: 10.5))
+                .foregroundStyle(ConsoleTheme.secondary)
+                .lineLimit(1)
+                .help(L10n.text("单次滚动行数（1–100）", "Lines per scroll (1–100)"))
+            Spacer(minLength: 4)
+            TextField(L10n.text("行数", "Lines"), text: $text)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 46)
+                .focused($focused)
+                .onChange(of: text) { newValue in
+                    let digits = newValue.filter(\.isNumber)
+                    guard digits == newValue else {
+                        text = digits
+                        return
+                    }
+                    guard let value = Int(digits) else { return }
+                    if value > 100 {
+                        text = "100"
+                    } else if value >= 1 {
+                        onChange(value)
+                    }
+                }
+                .onChange(of: focused) { isFocused in
+                    if !isFocused { commit() }
+                }
+                .help(L10n.text("可直接输入 1–100 的行数", "Type a value from 1 to 100"))
+            Stepper(
+                L10n.text("增减滚动行数", "Increment or decrement lines per scroll"),
+                value: Binding(get: { amount }, set: { onChange($0) }),
+                in: 1...100
+            )
+            .labelsHidden()
+            .controlSize(.small)
+            .help(L10n.text("单次滚动行数（1–100）", "Lines per scroll (1–100)"))
+        }
+        .onChange(of: amount) { text = String($0) }
+    }
+
+    private func commit() {
+        let value = min(max(Int(text) ?? amount, 1), 100)
+        text = String(value)
+        if value != amount { onChange(value) }
     }
 }
 
