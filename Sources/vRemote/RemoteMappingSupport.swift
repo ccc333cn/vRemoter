@@ -123,6 +123,8 @@ enum RemoteMappingTarget: String, CaseIterable, Identifiable, Codable, Hashable 
     case lockScreen
     case sleep
     case appSwitcher
+    case mouseScrollUp
+    case mouseScrollDown
     case custom
 
     var id: String { rawValue }
@@ -160,6 +162,8 @@ enum RemoteMappingTarget: String, CaseIterable, Identifiable, Codable, Hashable 
         case .lockScreen: L10n.text("锁屏", "Lock Screen")
         case .sleep: L10n.text("睡眠", "Sleep")
         case .appSwitcher: L10n.text("切换应用", "App Switcher")
+        case .mouseScrollUp: L10n.text("鼠标滚动-上", "Mouse Scroll Up")
+        case .mouseScrollDown: L10n.text("鼠标滚动-下", "Mouse Scroll Down")
         case .custom: L10n.text("录制任意按键…", "Record a key…")
         }
     }
@@ -246,6 +250,26 @@ enum RemoteMappingTarget: String, CaseIterable, Identifiable, Codable, Hashable 
         }
         post(state: 0xA)
         post(state: 0xB)
+    }
+}
+
+struct RemoteScrollConfig: Codable, Hashable {
+    let amount: Int
+
+    static let `default` = RemoteScrollConfig(amount: 3)
+
+    func post(up: Bool) {
+        let clampedAmount = min(max(amount, 1), 100)
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: CGEventSource(stateID: .hidSystemState),
+            units: .line,
+            wheelCount: 1,
+            wheel1: Int32(up ? clampedAmount : -clampedAmount),
+            wheel2: 0,
+            wheel3: 0
+        ) else { return }
+        event.setIntegerValueField(.eventSourceUserData, value: Key.syntheticMarker)
+        event.post(tap: .cghidEventTap)
     }
 }
 
@@ -363,6 +387,17 @@ final class RemoteMappingStore: ObservableObject {
     private let prefix = "remoteMapping."
     private let enabledPrefix = "remoteMappingEnabled."
     private let customPrefix = "remoteCustomMapping."
+    private let scrollPrefix = "remoteScrollMapping."
+
+    private struct RepeatKey: Hashable {
+        let remote: SupportedRemoteID
+        let buttonID: String
+    }
+
+    private static let repeatInitialDelay: TimeInterval = 0.5
+    private static let repeatInterval: TimeInterval = 0.06
+    private let repeatLock = NSLock()
+    private var repeatTimers: [RepeatKey: DispatchWorkItem] = [:]
 
     private init() {}
 
@@ -422,6 +457,40 @@ final class RemoteMappingStore: ObservableObject {
         }
     }
 
+    private func scrollConfigKey(
+        for button: RemoteButtonDefinition,
+        remote: SupportedRemoteID,
+        up: Bool
+    ) -> String {
+        scrollPrefix + remote.rawValue + "." + button.id + (up ? ".up" : ".down")
+    }
+
+    func scrollConfig(
+        for button: RemoteButtonDefinition,
+        remote: SupportedRemoteID,
+        up: Bool
+    ) -> RemoteScrollConfig {
+        let key = scrollConfigKey(for: button, remote: remote, up: up)
+        guard let data = defaults.data(forKey: key),
+              let config = try? JSONDecoder().decode(RemoteScrollConfig.self, from: data)
+        else { return .default }
+        return RemoteScrollConfig(amount: min(max(config.amount, 1), 100))
+    }
+
+    func setScrollConfig(
+        _ config: RemoteScrollConfig,
+        for button: RemoteButtonDefinition,
+        remote: SupportedRemoteID,
+        up: Bool
+    ) {
+        guard !button.voiceControlled, button.remappable else { return }
+        let bounded = RemoteScrollConfig(amount: min(max(config.amount, 1), 100))
+        if let data = try? JSONEncoder().encode(bounded) {
+            defaults.set(data, forKey: scrollConfigKey(for: button, remote: remote, up: up))
+            revision += 1
+        }
+    }
+
     func targetTitle(
         for button: RemoteButtonDefinition,
         remote: SupportedRemoteID
@@ -434,25 +503,82 @@ final class RemoteMappingStore: ObservableObject {
         return value.title
     }
 
+    private func cancelRepeat(for key: RepeatKey) {
+        repeatLock.lock()
+        let item = repeatTimers.removeValue(forKey: key)
+        repeatLock.unlock()
+        item?.cancel()
+    }
+
+    private func supportsRepeat(_ target: RemoteMappingTarget) -> Bool {
+        target.keyboard != nil || target == .custom || target == .mouseScrollUp || target == .mouseScrollDown
+    }
+
     func post(
         button: RemoteButtonDefinition,
         remote: SupportedRemoteID,
         isDown: Bool
     ) {
-        let value = target(for: button, remote: remote)
-        // 切换器会话期间：方向键左右重定向为 Tab / Shift+Tab（仅 keyDown 生效）。
-        if AppSwitcherSession.shared.isActive,
-           value == .arrowLeft || value == .arrowRight {
-            if isDown {
-                AppSwitcherSession.shared.redirectArrow(isRight: value == .arrowRight)
+        let key = RepeatKey(remote: remote, buttonID: button.id)
+        cancelRepeat(for: key)
+
+        func postAction(isDown: Bool) {
+            let value = target(for: button, remote: remote)
+            if AppSwitcherSession.shared.isActive,
+               value == .arrowLeft || value == .arrowRight {
+                if isDown {
+                    AppSwitcherSession.shared.redirectArrow(isRight: value == .arrowRight)
+                }
+                return
             }
-            return
+            if value == .custom {
+                customShortcut(for: button, remote: remote)?.post(isDown: isDown)
+            } else if value == .mouseScrollUp || value == .mouseScrollDown {
+                if isDown {
+                    scrollConfig(
+                        for: button,
+                        remote: remote,
+                        up: value == .mouseScrollUp
+                    ).post(up: value == .mouseScrollUp)
+                }
+            } else {
+                value.post(isDown: isDown)
+            }
         }
-        if value == .custom {
-            customShortcut(for: button, remote: remote)?.post(isDown: isDown)
-        } else {
-            value.post(isDown: isDown)
+
+        postAction(isDown: isDown)
+        guard isDown, supportsRepeat(target(for: button, remote: remote)) else { return }
+
+        let token = DispatchWorkItem {}
+        repeatLock.lock()
+        repeatTimers[key] = token
+        repeatLock.unlock()
+        var tick: ((Bool) -> Void)!
+        tick = { [weak self] isInitial in
+            guard let self else {
+                tick = nil
+                return
+            }
+            self.repeatLock.lock()
+            let isCurrent = self.repeatTimers[key] === token
+            self.repeatLock.unlock()
+            guard isCurrent, !token.isCancelled else {
+                tick = nil
+                return
+            }
+            if AppSwitcherSession.shared.isActive {
+                self.cancelRepeat(for: key)
+                tick = nil
+                return
+            }
+            if !isInitial { postAction(isDown: true) }
+            let next = DispatchWorkItem { tick(false) }
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + (isInitial ? Self.repeatInitialDelay : Self.repeatInterval),
+                execute: next
+            )
         }
+        tick(true)
     }
 
     func reset(_ remote: SupportedRemoteID) {
@@ -463,6 +589,13 @@ final class RemoteMappingStore: ObservableObject {
             defaults.removeObject(
                 forKey: customPrefix + remote.rawValue + "." + button.id
             )
+            defaults.removeObject(
+                forKey: scrollPrefix + remote.rawValue + "." + button.id + ".up"
+            )
+            defaults.removeObject(
+                forKey: scrollPrefix + remote.rawValue + "." + button.id + ".down"
+            )
+            cancelRepeat(for: RepeatKey(remote: remote, buttonID: button.id))
         }
         revision += 1
     }

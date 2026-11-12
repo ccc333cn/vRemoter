@@ -1099,6 +1099,15 @@ private struct MappingRow: View {
                     }
                     .labelsHidden()
                     .frame(width: 142)
+                    if isScrollTarget {
+                        Stepper(value: scrollAmountBinding, in: 1...100) {
+                            Text("\(scrollAmountBinding.wrappedValue)")
+                                .monospacedDigit()
+                                .frame(width: 26, alignment: .trailing)
+                        }
+                        .controlSize(.small)
+                        .help(L10n.text("单次滚动行数（1–100）", "Lines per scroll (1–100)"))
+                    }
                     if mappings.target(for: button, remote: remote) == .custom {
                         Button { showRecorder = true } label: {
                             Image(systemName: "record.circle")
@@ -1110,7 +1119,7 @@ private struct MappingRow: View {
                 }
             }
         }
-        .frame(height: 28)
+        .frame(height: isScrollTarget ? 36 : 28)
         .padding(.horizontal, 9)
         .background(ConsoleTheme.surface2)
         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -1129,6 +1138,24 @@ private struct MappingRow: View {
                 }
             )
         }
+    }
+
+    private var isScrollTarget: Bool {
+        let target = mappings.target(for: button, remote: remote)
+        return target == .mouseScrollUp || target == .mouseScrollDown
+    }
+
+    private var scrollAmountBinding: Binding<Int> {
+        let up = mappings.target(for: button, remote: remote) == .mouseScrollUp
+        return Binding(
+            get: { mappings.scrollConfig(for: button, remote: remote, up: up).amount },
+            set: { mappings.setScrollConfig(
+                RemoteScrollConfig(amount: $0),
+                for: button,
+                remote: remote,
+                up: up
+            ) }
+        )
     }
 
     /// 「自定义」菜单项标题：已录制显示「自定义（当前：⇧⌘K）」，未录制显示「自定义…」。
